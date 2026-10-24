@@ -1,7 +1,3 @@
-// ═══════════════════════════════════════════════════
-// utils.js — توابع کمکی
-// ═══════════════════════════════════════════════════
-
 export function escapeHTML(str) {
   if (str == null) return "";
   return String(str)

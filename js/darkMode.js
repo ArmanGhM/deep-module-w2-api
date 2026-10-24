@@ -1,7 +1,9 @@
 const THEME_BTN_SELECTOR = "#theme-btn";
 const ICON_SELECTOR = ".theme-btn__icon";
 
-// آیکون خورشید (برای نمایش در حالت دارک — تا کاربر بتونه به لایت سوییچ کنه)
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// آیکون خورشید (نمایش در دارک — کلیک → لایت)
 const SVG_SUN = `
 <svg class="svg_theme" xmlns="http://www.w3.org/2000/svg" width="24" height="24"
      viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -17,7 +19,7 @@ const SVG_SUN = `
   <path d="m19.07 4.93-1.41 1.41"></path>
 </svg>`;
 
-// آیکون ماه (برای نمایش در حالت لایت — تا کاربر بتونه به دارک سوییچ کنه)
+// آیکون ماه (نمایش در لایت — کلیک → دارک)
 const SVG_MOON = `
 <svg class="svg_theme" xmlns="http://www.w3.org/2000/svg" width="24" height="24"
      viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -25,12 +27,35 @@ const SVG_MOON = `
   <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
 </svg>`;
 
-// تبدیل رشته SVG به عنصر DOM بدون innerHTML
+// تبدیل رشته‌ی SVG به عنصر، با guard در برابر parsererror
 function createSvgElement(svgString) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgString.trim(), "image/svg+xml");
-  return doc.documentElement;
+  const root = doc.documentElement;
+
+  const isSvg =
+    root &&
+    root.namespaceURI === SVG_NS &&
+    root.tagName.toLowerCase() === "svg";
+  const hasError = doc.querySelector("parsererror");
+
+  if (!isSvg || hasError) {
+    console.warn("⚠️ SVG نامعتبر بود، آیکون خالی استفاده می‌شود");
+    const fallback = document.createElementNS(SVG_NS, "svg");
+    fallback.setAttribute("class", "svg_theme");
+    fallback.setAttribute("width", "24");
+    fallback.setAttribute("height", "24");
+    return fallback;
+  }
+
+  return root;
 }
+
+// کش — هر آیکون فقط یک بار پارس می‌شود
+const ICONS = {
+  sun: createSvgElement(SVG_SUN),
+  moon: createSvgElement(SVG_MOON),
+};
 
 function getTheme() {
   try {
@@ -46,27 +71,26 @@ function setTheme(theme) {
 
   html.classList.remove("dark-theme", "light-theme");
 
-  let svgString = null;
+  let iconKey = null;
 
   if (theme === "dark") {
     html.classList.add("dark-theme");
-    svgString = SVG_SUN;
+    iconKey = "sun";
   } else if (theme === "light") {
     html.classList.add("light-theme");
-    svgString = SVG_MOON;
+    iconKey = "moon";
   } else {
-    // auto
     if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
       html.classList.add("dark-theme");
-      svgString = SVG_SUN;
+      iconKey = "sun";
     } else {
-      svgString = SVG_MOON;
+      iconKey = "moon";
     }
   }
 
-  if (icon && svgString) {
-    const svgElement = createSvgElement(svgString);
-    icon.replaceChildren(svgElement);
+  if (icon && iconKey) {
+    // cloneNode لازم است چون replaceChildren نود را move می‌کند
+    icon.replaceChildren(ICONS[iconKey].cloneNode(true));
   }
 
   try {
@@ -77,7 +101,7 @@ function setTheme(theme) {
 // اعمال اولیه
 setTheme(getTheme());
 
-// گوش دادن به تغییرات تم سیستم برای حالت auto
+// حالت auto — واکنش به تغییر تم سیستم
 window
   .matchMedia("(prefers-color-scheme: dark)")
   .addEventListener("change", () => {
@@ -86,7 +110,7 @@ window
     }
   });
 
-// کلیک — با event delegation
+// کلیک — delegation
 document.addEventListener("click", (e) => {
   const btn = e.target.closest(THEME_BTN_SELECTOR);
   if (!btn) return;

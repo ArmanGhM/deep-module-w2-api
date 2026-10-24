@@ -1,19 +1,14 @@
-
-
 const API_BASE = "../../api";
-const DEFAULT_TIMEOUT = 8000;        // ۸ ثانیه
-const MAX_RETRIES = 3;                // حداکثر ۳ بار تلاش
+const DEFAULT_TIMEOUT = 8000;
+const MAX_RETRIES = 3; // ۳ retry بعد از تلاش اول → مجموعاً ۴ بار
 const CACHE_PREFIX = "shop_cache_";
-const CACHE_TTL = 1000 * 60 * 30;    // ۳۰ دقیقه
+const CACHE_TTL = 1000 * 60 * 30;
 
-// ═══════════════════════════════════════════════════
-// کلاس خطای اختصاصی
-// ═══════════════════════════════════════════════════
 export class ApiError extends Error {
   constructor(message, { type = "unknown", status = null, url = null } = {}) {
     super(message);
     this.name = "ApiError";
-    this.type = type;     // "network" | "timeout" | "http" | "parse" | "abort" | "offline"
+    this.type = type;
     this.status = status;
     this.url = url;
   }
@@ -38,17 +33,21 @@ export class ApiError extends Error {
   }
 }
 
-// ═══════════════════════════════════════════════════
-// fetch با timeout
-// ═══════════════════════════════════════════════════
-async function fetchWithTimeout(url, { timeout = DEFAULT_TIMEOUT, signal } = {}) {
+async function fetchWithTimeout(
+  url,
+  { timeout = DEFAULT_TIMEOUT, signal } = {},
+) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort("timeout"), timeout);
+  let timedOut = false;
 
-  // اگه signal بیرونی لغو شد، این یکی هم لغو بشه
-  const onAbort = () => controller.abort("external");
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeout);
+
+  const onAbort = () => controller.abort();
   if (signal) {
-    if (signal.aborted) controller.abort("external");
+    if (signal.aborted) controller.abort();
     else signal.addEventListener("abort", onAbort, { once: true });
   }
 
@@ -56,12 +55,10 @@ async function fetchWithTimeout(url, { timeout = DEFAULT_TIMEOUT, signal } = {})
     return await fetch(url, { signal: controller.signal });
   } catch (err) {
     if (err.name === "AbortError") {
-      if (controller.signal.reason === "timeout") {
+      if (timedOut)
         throw new ApiError("درخواست منقضی شد", { type: "timeout", url });
-      }
       throw new ApiError("درخواست لغو شد", { type: "abort", url });
     }
-    // خطای شبکه یا آفلاین
     if (!navigator.onLine) {
       throw new ApiError("دستگاه آفلاین است", { type: "offline", url });
     }
@@ -72,33 +69,48 @@ async function fetchWithTimeout(url, { timeout = DEFAULT_TIMEOUT, signal } = {})
   }
 }
 
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+// delay قابل لغو — اگر abort شد، بلافاصله resolve می‌شود
+function delay(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const id = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(id);
+      resolve();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
-// ═══════════════════════════════════════════════════
-// Cache Helpers
-// ═══════════════════════════════════════════════════
 function cacheKey(url) {
   return CACHE_PREFIX + url.replace(/[^\w]/g, "_");
 }
 
+// بازگشت { hit, data } تا miss از داده‌ی falsy تفکیک شود
 function readCache(url) {
   try {
     const raw = localStorage.getItem(cacheKey(url));
-    if (!raw) return null;
+    if (!raw) return { hit: false, data: null };
     const { data, time } = JSON.parse(raw);
     if (Date.now() - time > CACHE_TTL) {
       localStorage.removeItem(cacheKey(url));
-      return null;
+      return { hit: false, data: null };
     }
-    return data;
+    return { hit: true, data };
   } catch {
-    return null;
+    return { hit: false, data: null };
   }
 }
 
 function writeCache(url, data) {
   try {
-    localStorage.setItem(cacheKey(url), JSON.stringify({ data, time: Date.now() }));
+    localStorage.setItem(
+      cacheKey(url),
+      JSON.stringify({ data, time: Date.now() }),
+    );
   } catch {
     /* ignore quota errors */
   }
@@ -110,9 +122,6 @@ export function clearCache() {
     .forEach((k) => localStorage.removeItem(k));
 }
 
-// ═══════════════════════════════════════════════════
-// Core: getJSON با retry + timeout + cache fallback
-// ═══════════════════════════════════════════════════
 export async function getJSON(path, options = {}) {
   const url = `${API_BASE}/${path}`;
   const {
@@ -123,16 +132,22 @@ export async function getJSON(path, options = {}) {
     onRetry = null,
   } = options;
 
-  // اگه کاربر آفلاینه، مستقیم برو سر کش
+  const maxAttempts = Math.max(1, (Number(retries) | 0) + 1);
+
+  // آفلاین → فقط کش
   if (!navigator.onLine) {
-    const cached = useCache ? readCache(url) : null;
-    if (cached) return cached;
+    if (useCache) {
+      const { hit, data } = readCache(url);
+      if (hit) return data;
+    }
     throw new ApiError("دستگاه آفلاین است", { type: "offline", url });
   }
 
   let lastError = null;
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (signal?.aborted) break;
+
     try {
       const res = await fetchWithTimeout(url, { timeout, signal });
 
@@ -154,38 +169,35 @@ export async function getJSON(path, options = {}) {
       if (useCache) writeCache(url, data);
       return data;
     } catch (err) {
-      lastError = err instanceof ApiError ? err : new ApiError("خطای نامشخص", { url });
+      lastError =
+        err instanceof ApiError ? err : new ApiError("خطای نامشخص", { url });
 
-      // این خطاها رو retry نکن
       const shouldRetry =
         lastError.type === "network" ||
         lastError.type === "timeout" ||
         (lastError.type === "http" && lastError.status >= 500);
 
-      if (!shouldRetry || attempt === retries || signal?.aborted) break;
+      if (!shouldRetry || attempt === maxAttempts - 1 || signal?.aborted) break;
 
-      // Backoff نمایی: 0.5s, 1s, 2s
       const waitMs = Math.min(500 * Math.pow(2, attempt), 3000);
       if (onRetry) onRetry({ attempt: attempt + 1, waitMs, error: lastError });
-      await delay(waitMs);
+
+      await delay(waitMs, signal);
     }
   }
 
   // Fallback به کش
   if (useCache) {
-    const cached = readCache(url);
-    if (cached) {
+    const { hit, data } = readCache(url);
+    if (hit) {
       console.warn(`📦 استفاده از کش برای: ${path}`);
-      return cached;
+      return data;
     }
   }
 
-  throw lastError;
+  throw lastError ?? new ApiError("خطای نامشخص", { url });
 }
 
-// ═══════════════════════════════════════════════════
-// API shortcuts
-// ═══════════════════════════════════════════════════
 export const api = {
   products: (opts) => getJSON("products.json", opts),
   categories: (opts) => getJSON("categories.json", opts),
@@ -195,9 +207,6 @@ export const api = {
   stock: (opts) => getJSON("stock.json", opts),
 };
 
-// ═══════════════════════════════════════════════════
-// Online/Offline watcher
-// ═══════════════════════════════════════════════════
 export function watchConnectivity({ onOnline, onOffline } = {}) {
   const online = () => onOnline?.();
   const offline = () => onOffline?.();

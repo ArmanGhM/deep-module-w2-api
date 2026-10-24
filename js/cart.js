@@ -1,18 +1,8 @@
-
 import { formatPrice, safeInt, isValidProduct } from "./utils.js";
 
 const CART_KEY = "supermarket_cart";
 const MAX_ITEMS = 100;
 const MAX_QUANTITY = 99;
-
-
-console.log("🛒 [cart.js] loaded:", {
-  cartBtn: !!document.getElementById("cart-btn"),
-  cartModal: !!document.getElementById("cart-modal"),
-  cartBody: !!document.getElementById("cart-body"),
-  cartFooter: !!document.getElementById("cart-footer"),
-});
-
 
 function validateCartItem(item) {
   if (!item || typeof item !== "object") return null;
@@ -38,7 +28,6 @@ function validateCartItem(item) {
   };
 }
 
-
 export function getCart() {
   try {
     const raw = localStorage.getItem(CART_KEY);
@@ -54,7 +43,6 @@ export function getCart() {
     return [];
   }
 }
-
 
 function saveCart(cart) {
   if (!Array.isArray(cart)) cart = [];
@@ -73,7 +61,6 @@ function saveCart(cart) {
   updateCartUI();
   window.dispatchEvent(new CustomEvent("cart:updated", { detail: safeCart }));
 }
-
 
 export function addToCart(product) {
   if (!isValidProduct(product)) {
@@ -125,9 +112,6 @@ export function decreaseQuantity(id) {
   }
 }
 
-// ═══════════════════════════════════════════════════
-// محاسبات
-// ═══════════════════════════════════════════════════
 export function getCartTotal() {
   return getCart().reduce((sum, item) => {
     const price = safeInt(item.price, 0);
@@ -144,9 +128,6 @@ export function clearCart() {
   saveCart([]);
 }
 
-// ═══════════════════════════════════════════════════
-// به‌روزرسانی UI
-// ═══════════════════════════════════════════════════
 function updateCartUI() {
   const count = getCartCount();
   const badge = document.getElementById("cart-count");
@@ -159,19 +140,15 @@ function updateCartUI() {
   renderCartModal();
 }
 
-// ═══════════════════════════════════════════════════
-// رندر مودال
-// ═══════════════════════════════════════════════════
 function renderCartModal() {
   const body = document.getElementById("cart-body");
   const footer = document.getElementById("cart-footer");
   if (!body || !footer) return;
 
   const cart = getCart();
-  body.textContent = "";
-  footer.textContent = "";
+  body.replaceChildren();
+  footer.replaceChildren();
 
-  // حالت خالی
   if (cart.length === 0) {
     const empty = document.createElement("div");
     empty.className = "cart-empty";
@@ -194,7 +171,6 @@ function renderCartModal() {
     return;
   }
 
-  // آیتم‌ها
   cart.forEach((item) => {
     const el = document.createElement("div");
     el.className = "cart-item";
@@ -258,7 +234,6 @@ function renderCartModal() {
     body.appendChild(el);
   });
 
-  // Footer
   const total = getCartTotal();
 
   const totalBox = document.createElement("div");
@@ -282,9 +257,6 @@ function renderCartModal() {
   footer.append(totalBox, checkoutBtn);
 }
 
-// ═══════════════════════════════════════════════════
-// Modal open/close
-// ═══════════════════════════════════════════════════
 export function openModal(id) {
   const modal = document.getElementById(id);
   if (!modal) {
@@ -293,7 +265,6 @@ export function openModal(id) {
   }
   modal.classList.add("modal--open");
   document.body.style.overflow = "hidden";
-  console.log("🛒 modal opened:", id);
 }
 
 export function closeModal(id) {
@@ -303,44 +274,31 @@ export function closeModal(id) {
   if (!document.querySelector(".modal--open")) {
     document.body.style.overflow = "";
   }
-  console.log("🛒 modal closed:", id);
 }
 
-
-
-// Global click handler
 document.addEventListener("click", (e) => {
-  // 1. Cart button
   const cartBtn = e.target.closest("#cart-btn");
   if (cartBtn) {
     e.preventDefault();
     e.stopPropagation();
-    console.log("🛒 cart-btn clicked");
     openModal("cart-modal");
     return;
   }
 
-  // 2. Close button / overlay via data-close
   const closeEl = e.target.closest("[data-close]");
   if (closeEl) {
     e.preventDefault();
     e.stopPropagation();
-    console.log("🛒 [data-close] clicked:", closeEl.dataset.close);
     closeModal(closeEl.dataset.close);
     return;
   }
 
-  // 3. Direct overlay click
   if (e.target.classList.contains("modal__overlay")) {
     const modal = e.target.closest(".modal");
-    if (modal) {
-      console.log("🛒 overlay clicked");
-      closeModal(modal.id);
-    }
+    if (modal) closeModal(modal.id);
     return;
   }
 
-  // 4. Cart item actions
   const actionBtn = e.target.closest("[data-action]");
   if (actionBtn) {
     const action = actionBtn.dataset.action;
@@ -357,25 +315,19 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// ESC key
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   document.querySelectorAll(".modal--open").forEach((m) => {
-    console.log("🛒 ESC pressed");
     closeModal(m.id);
   });
 });
 
-// Initial render (safe - runs after DOM ready since module)
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", updateCartUI);
 } else {
   updateCartUI();
 }
 
-// ═══════════════════════════════════════════════════
-// Stubs — این‌ها فقط برای سازگاری با main.js قدیمی
-// ═══════════════════════════════════════════════════
 export function initCart() {
   console.log("✅ initCart() — no-op (auto-bound)");
 }
