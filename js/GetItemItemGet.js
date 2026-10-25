@@ -1,4 +1,4 @@
-const API_BASE = "../../api";
+const API_BASE = "../api";
 const DEFAULT_TIMEOUT = 8000;
 const MAX_RETRIES = 3; // ۳ retry بعد از تلاش اول → مجموعاً ۴ بار
 const CACHE_PREFIX = "shop_cache_";
